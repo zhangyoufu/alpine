@@ -1,0 +1,101 @@
+on: push
+
+env:
+  PACKAGER: Youfu Zhang <zhangyoufu@gmail.com>
+  PRIVATE_KEY_FILENAME: zhangyoufu.rsa
+
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[ci skip]')"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        alpine_version: [v3.9, v3.10, v3.11, edge]
+        docker_arch: [amd64, i386, arm64v8, arm32v7, arm32v6, ppc64le, s390x] # arm32v5 is not supported by alpine
+    steps:
+    - uses: actions/checkout@v2
+    - name: Register binfmt_misc entry for qemu-user-static 
+      env:
+        DOCKER_ARCH: ${{ matrix.docker_arch }}
+      run: |
+        case ${DOCKER_ARCH} in
+        	amd64|i386)
+        		QEMU_ARCH=
+        		;;
+        	arm32*)
+        		QEMU_ARCH=arm
+        		;;
+        	arm64*)
+        		QEMU_ARCH=aarch64
+        		;;
+        	*)
+        		QEMU_ARCH=${DOCKER_ARCH}
+        		;;
+        esac
+        if [ -n "${QEMU_ARCH}" ]; then
+        	docker rm $(docker create --volume qemu-user-static:/usr/bin multiarch/qemu-user-static:${QEMU_ARCH} dummy)
+        	docker run --rm --privileged --volume qemu-user-static:/usr/bin:ro multiarch/qemu-user-static:register --persistent yes
+        fi
+    - name: Prepare .abuild
+      env:
+        PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      run: |
+        mkdir .abuild
+        echo "PACKAGER='${PACKAGER}'" >.abuild/abuild.conf
+        if [ "${GITHUB_REF}" = "refs/heads/master" ]; then
+        	cat >.abuild/${PRIVATE_KEY_FILENAME} <<<${PRIVATE_KEY}
+        else
+        	PRIVATE_KEY_FILENAME=dummy.rsa
+        	openssl genrsa -out .abuild/${PRIVATE_KEY_FILENAME}
+        	echo 'Dummy signing key generated.'
+        fi
+        echo "PACKAGER_PRIVKEY='/root/.abuild/${PRIVATE_KEY_FILENAME}'" >>.abuild/abuild.conf
+        openssl rsa -in ".abuild/${PRIVATE_KEY_FILENAME}" -pubout -out ".abuild/${PRIVATE_KEY_FILENAME}.pub"
+    - name: Build packages
+      env:
+        ALPINE_VERSION: ${{ matrix.alpine_version }}
+        DOCKER_ARCH: ${{ matrix.docker_arch }}
+      run: |
+        docker run --rm --group-add abuild --interactive --volume $(pwd):/root --volume $(pwd)/repo/${ALPINE_VERSION}:/root/packages "${DOCKER_ARCH}/alpine:${ALPINE_VERSION#v}" <<-'EOF'
+        	set -ex
+        	echo "::set-env name=ALPINE_ARCH::$(apk --print-arch)"
+        	cp /root/.abuild/*.pub /etc/apk/keys/
+        	apk add abuild build-base linux-headers libmnl libmnl-dev
+        	cd /root/main/libnftnl
+        	abuild -F -r
+        	apk add /root/packages/main/*/libnftnl-dev-*.apk /root/packages/main/*/libnftnl-libs-*.apk
+        	cd /root/main/iptables
+        	abuild -F -r
+        EOF
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: repo-${{ matrix.alpine_version }}-${{ env.ALPINE_ARCH }}
+        path: repo/
+  gh-pages:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v2
+    - name: Merge all artifacts
+      run: mkdir gh-pages; cp -lr repo-*/* gh-pages
+    - name: Generate public key
+      env:
+        PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      run: openssl rsa -pubout -out gh-pages/${PRIVATE_KEY_FILENAME}.pub <<<${PRIVATE_KEY}
+    - name: Commit to gh-pages
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${{ secrets.GITHUB_PERSONAL_ACCESS_TOKEN }}
+      run: |
+        cd gh-pages
+        touch .nojekyll
+        git init
+        git config user.name 'GitHub Actions'
+        git config user.email "$(whoami)@$(hostname --fqdn)"
+        git config http.https://github.com/.extraheader "Authorization: Basic $(echo -n "dummy:${GITHUB_PERSONAL_ACCESS_TOKEN}" | base64 --wrap=0)"
+        git add --all
+        git commit --message 'automatic commit'
+        git push --force https://github.com/${GITHUB_REPOSITORY}.git HEAD:gh-pages
