@@ -20,6 +20,17 @@ source="https://www.netfilter.org/projects/iptables/files/iptables-$pkgver.tar.b
 	ebtables.confd
 	"
 
+prepare() {
+	default_prepare
+
+	sed -i 's|SOCK_RAW, IPPROTO_RAW|SOCK_DGRAM, IPPROTO_UDP|g' \
+		extensions/libxt_set.h \
+		libiptc/libiptc.c \
+		libxtables/xtables.c
+	sed -i 's|SOCK_RAW, NETLINK_|SOCK_DGRAM, NETLINK_|g' \
+		libipq/libipq.c
+}
+
 build() {
 	export CFLAGS="$CFLAGS -D_GNU_SOURCE"
 	./configure \
