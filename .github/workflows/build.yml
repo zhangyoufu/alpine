@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        alpine_version: [v3.9, v3.10, v3.11, edge]
+        alpine_version: [v3.9, v3.10, v3.11, v3.12, edge]
         docker_arch: [amd64, i386, arm64v8, arm32v7, arm32v6, ppc64le, s390x] # arm32v5 is not supported by alpine
     steps:
     - uses: actions/checkout@v2

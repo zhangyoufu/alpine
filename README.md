@@ -2,7 +2,7 @@
 
 # Introduction
 
-Build alpine packages for {v3.9, v3.10, v3.11, edge} × {amd64, i386, arm64v8, arm32v6, arm32v7, ppc64le, s390x}, and deploy to GitHub Pages.
+Build alpine packages for {v3.9, v3.10, v3.11, v3.12, edge} × {amd64, i386, arm64v8, arm32v6, arm32v7, ppc64le, s390x}, and deploy to GitHub Pages.
 
 Currently provides a modified version of iptables which does not require CAP_NET_RAW.
 
